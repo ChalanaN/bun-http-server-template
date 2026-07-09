@@ -1,11 +1,20 @@
+import * as fs from "node:fs/promises"
 import * as path from "node:path"
 
 const STATIC_DIR = path.resolve(__dirname, process.env.STATIC_DIR || "public")
+const StaticFileMap = new Map<string, number>()
+
+// Load a static file map into memory to reduce I/O calls
+;(await fs.readdir(STATIC_DIR, {
+    recursive: true,
+    withFileTypes: true
+})).forEach(entry => entry.isFile() && StaticFileMap.set(entry.parentPath + "/" + entry.name, 0))
 
 const sendFile = (filepath: string, options?: { statusCode?: number }): Response => {
     filepath = decodeURIComponent(filepath)
     let resolvedPath = path.resolve(STATIC_DIR, "." + filepath)
 
+    if (resolvedPath == STATIC_DIR) resolvedPath = path.join(resolvedPath, "index.html")
     if (!resolvedPath.startsWith(STATIC_DIR + path.sep)) return new Response("403", { status: 403 })
 
     return new Response(Bun.file(resolvedPath), {
@@ -13,7 +22,7 @@ const sendFile = (filepath: string, options?: { statusCode?: number }): Response
     })
 }
 
-Bun.serve({
+const server = Bun.serve({
     port: process.env.PORT || 80,
 
     async fetch(req) {
@@ -37,3 +46,5 @@ Bun.serve({
         }
     }
 })
+
+console.log("server ready at:", `\x1B[34m${server.url.href}\x1B[0m`)
