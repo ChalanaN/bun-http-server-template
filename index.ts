@@ -10,6 +10,13 @@ const StaticFileMap = new Map<string, number>()
     withFileTypes: true
 })).forEach(entry => entry.isFile() && StaticFileMap.set(entry.parentPath + "/" + entry.name, 0))
 
+const resolveStaticPath = (resolvedPath: string): string => {
+    if (StaticFileMap.has(resolvedPath)) return resolvedPath
+    if (StaticFileMap.has(resolvedPath + ".html")) return resolvedPath + ".html"
+    if (StaticFileMap.has(resolvedPath = path.join(resolvedPath, "index.html"))) return resolvedPath
+    return path.join(STATIC_DIR, "404.html")
+}
+
 const sendFile = (filepath: string, options?: { statusCode?: number }): Response => {
     filepath = decodeURIComponent(filepath)
     let resolvedPath = path.resolve(STATIC_DIR, "." + filepath)
@@ -17,7 +24,7 @@ const sendFile = (filepath: string, options?: { statusCode?: number }): Response
     if (resolvedPath == STATIC_DIR) resolvedPath = path.join(resolvedPath, "index.html")
     if (!resolvedPath.startsWith(STATIC_DIR + path.sep)) return new Response("403", { status: 403 })
 
-    return new Response(Bun.file(resolvedPath), {
+    return new Response(Bun.file(resolveStaticPath(resolvedPath)), {
         status: options?.statusCode
     })
 }
