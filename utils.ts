@@ -1,3 +1,7 @@
+export type Mutable<T> = {
+    -readonly [K in keyof T]: T[K]
+};
+
 export const MIME_TYPES = {
   // Audio
   "aac": "audio/aac",
@@ -69,5 +73,21 @@ export const MIME_TYPES = {
   "glb": "model/gltf-binary"
 } as const
 
-export type AllowedFileExtensions = keyof typeof MIME_TYPES;
-export type AllowedMimeType = (typeof MIME_TYPES)[AllowedFileExtensions];
+export type AllowedFileExtension = keyof typeof MIME_TYPES;
+export type AllowedMimeType = (typeof MIME_TYPES)[AllowedFileExtension];
+
+export const CacheControl: Partial<Record<AllowedMimeType, string>> = {
+    "text/html": "public, max-age=1800",
+    "text/javascript": "public, max-age=1800",
+    "text/css": "public, max-age=1800",
+    "application/json": "no-store",
+    "text/plain": "no-store",
+    "image/png": "public, max-age=18000",
+    "image/jpeg": "public, max-age=18000",
+    "image/webp": "public, max-age=18000",
+    "image/svg+xml": "public, max-age=18000",
+    "image/x-icon": "public, max-age=18000",
+    "audio/mpeg": "public, max-age=1800",
+    "font/woff": "public, max-age=86400",
+    "font/woff2": "public, max-age=86400",
+} as const

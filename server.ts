@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
 import { redis } from "bun";
-import { MIME_TYPES, type AllowedFileExtensions } from "./utils";
+import { CacheControl, MIME_TYPES, type AllowedFileExtension, type Mutable } from "./utils";
 
 const STATIC_DIR = path.resolve(__dirname, process.env.STATIC_DIR || "public")
 const StaticFileMap = new Map<string, number>()
@@ -15,54 +15,6 @@ const id = process.argv[2]
     recursive: true,
     withFileTypes: true
 })).forEach(entry => entry.isFile() && StaticFileMap.set(entry.parentPath + "/" + entry.name, 0))
-
-const resolveStaticPath = (resolvedPath: string): string => {
-    if (StaticFileMap.has(resolvedPath)) return resolvedPath
-    if (StaticFileMap.has(resolvedPath + ".html")) return resolvedPath + ".html"
-    if (StaticFileMap.has(resolvedPath = path.join(resolvedPath, "index.html"))) return resolvedPath
-    return path.join(STATIC_DIR, "404.html")
-}
-
-const sendFile = async (filepath: string, options?: ResponseInit): Promise<Response> => {
-    filepath = decodeURIComponent(filepath)
-    let resolvedPath = path.resolve(STATIC_DIR, "." + filepath)
-
-    if (resolvedPath == STATIC_DIR) resolvedPath = path.join(resolvedPath, "index.html")
-    if (!resolvedPath.startsWith(STATIC_DIR + path.sep)) return Promise.resolve(new Response("403", { status: 403 }))
-
-    resolvedPath = resolveStaticPath(resolvedPath)
-    let fileExtension = resolvedPath.match(/\.(\w+?)$/)?.[1]
-
-    let fileBuf = await redis.getBuffer(`file:${resolvedPath}`)
-    if (fileBuf) {
-        // console.log(`#${id}`, Date.now(), "cache hit:", resolvedPath, fileBuf.length)
-        return new Response(fileBuf, {
-            headers: {
-                "Content-Type": MIME_TYPES[fileExtension as AllowedFileExtensions] || "text/plain",
-                "Content-Length": fileBuf.length.toString()
-            },
-            ...options
-        })
-    }
-
-    let file = Bun.file(resolvedPath)
-
-    if (fileExtension && MEM_CACHABLE_FILES.includes(fileExtension)) {
-        let fileBuf = new Uint8Array(await file.arrayBuffer())
-        // console.log(`#${id}`, "done caching:", resolvedPath, fileBuf.length)
-        redis.set(`file:${resolvedPath}`, fileBuf, "EX", MEM_CACHE_TIMEOUT)
-
-        return new Response(fileBuf, {
-            headers: {
-                "Content-Type": MIME_TYPES[fileExtension as AllowedFileExtensions] || "text/plain",
-                "Content-Length": file.size.toString()
-            },
-            ...options
-        })
-    }
-
-    return new Response(file, options)
-}
 
 const server = Bun.serve({
     port: process.env.PORT || 80,
@@ -91,3 +43,49 @@ const server = Bun.serve({
 })
 
 console.log(`#${id}`, "server ready at:", `\x1B[34m${server.url.href}\x1B[0m`)
+
+async function sendFile (filepath: string, options: Mutable<ResponseInit> = {}): Promise<Response> {
+    filepath = decodeURIComponent(filepath)
+    let resolvedPath = path.resolve(STATIC_DIR, "." + filepath)
+
+    if (resolvedPath == STATIC_DIR) resolvedPath = path.join(resolvedPath, "index.html")
+    if (!resolvedPath.startsWith(STATIC_DIR + path.sep)) return Promise.resolve(new Response("403", { status: 403 }))
+
+    resolvedPath = resolveStaticPath(resolvedPath)
+
+    let fileExtension = resolvedPath.match(/\.(\w+?)$/)?.[1]
+    let contentType = MIME_TYPES[fileExtension as AllowedFileExtension] || "text/plain"
+
+    options.headers = {
+        "Content-Type": contentType,
+        "Cache-Control": CacheControl[contentType],
+        ...options.headers
+    }
+
+    let fileBuf = await redis.getBuffer(`file:${resolvedPath}`)
+    if (fileBuf) {
+        // @ts-ignore
+        options.headers["Content-Length"] = fileBuf.length.toString()
+        return new Response(fileBuf, options)
+    }
+
+    let file = Bun.file(resolvedPath)
+
+    if (fileExtension && MEM_CACHABLE_FILES.includes(fileExtension)) {
+        let fileBuf = new Uint8Array(await file.arrayBuffer())
+        redis.set(`file:${resolvedPath}`, fileBuf, "EX", MEM_CACHE_TIMEOUT)
+
+        // @ts-ignore
+        options.headers["Content-Length"] = fileBuf.length.toString()
+        return new Response(fileBuf, options)
+    }
+
+    return new Response(file, options)
+}
+
+function resolveStaticPath (resolvedPath: string): string {
+    if (StaticFileMap.has(resolvedPath)) return resolvedPath
+    if (StaticFileMap.has(resolvedPath + ".html")) return resolvedPath + ".html"
+    if (StaticFileMap.has(resolvedPath = path.join(resolvedPath, "index.html"))) return resolvedPath
+    return path.join(STATIC_DIR, "404.html")
+}
