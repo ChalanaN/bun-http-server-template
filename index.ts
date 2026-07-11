@@ -1,8 +1,11 @@
 import * as fs from "node:fs/promises"
 import * as path from "node:path"
+import { redis } from "bun";
+import { MIME_TYPES, type AllowedFileExtensions } from "./utils";
 
 const STATIC_DIR = path.resolve(__dirname, process.env.STATIC_DIR || "public")
 const StaticFileMap = new Map<string, number>()
+const MEM_CACHABLE_FILES = ["html", "js", "css", "ico", "svg"]
 
 // Load a static file map into memory to reduce I/O calls
 ;(await fs.readdir(STATIC_DIR, {
@@ -17,16 +20,45 @@ const resolveStaticPath = (resolvedPath: string): string => {
     return path.join(STATIC_DIR, "404.html")
 }
 
-const sendFile = (filepath: string, options?: { statusCode?: number }): Response => {
+const sendFile = async (filepath: string, options?: ResponseInit): Promise<Response> => {
     filepath = decodeURIComponent(filepath)
     let resolvedPath = path.resolve(STATIC_DIR, "." + filepath)
 
     if (resolvedPath == STATIC_DIR) resolvedPath = path.join(resolvedPath, "index.html")
-    if (!resolvedPath.startsWith(STATIC_DIR + path.sep)) return new Response("403", { status: 403 })
+    if (!resolvedPath.startsWith(STATIC_DIR + path.sep)) return Promise.resolve(new Response("403", { status: 403 }))
 
-    return new Response(Bun.file(resolveStaticPath(resolvedPath)), {
-        status: options?.statusCode
-    })
+    resolvedPath = resolveStaticPath(resolvedPath)
+    let fileExtension = resolvedPath.match(/\.(\w+?)$/)?.[1]
+
+    let fileBuf = await redis.getBuffer(`file:${resolvedPath}`)
+    if (fileBuf) {
+        console.log(Date.now(), "cache hit:", resolvedPath, fileBuf.length)
+        return new Response(fileBuf, {
+            headers: {
+                "Content-Type": MIME_TYPES[fileExtension as AllowedFileExtensions] || "text/plain",
+                "Content-Length": fileBuf.length.toString()
+            },
+            ...options
+        })
+    }
+
+    let file = Bun.file(resolvedPath)
+
+    if (fileExtension && MEM_CACHABLE_FILES.includes(fileExtension)) {
+        let fileBuf = new Uint8Array(await file.arrayBuffer())
+        console.log("done caching:", resolvedPath, fileBuf.length)
+        redis.set(`file:${resolvedPath}`, fileBuf)
+
+        return new Response(fileBuf, {
+            headers: {
+                "Content-Type": MIME_TYPES[fileExtension as AllowedFileExtensions] || "text/plain",
+                "Content-Length": file.size.toString()
+            },
+            ...options
+        })
+    }
+
+    return new Response(file, options)
 }
 
 const server = Bun.serve({
@@ -37,7 +69,7 @@ const server = Bun.serve({
             case "GET":
                 const requestURL = new URL(req.url)
 
-                return sendFile(requestURL.pathname)
+                return await sendFile(requestURL.pathname)
 
             default:
                 return new Response("405", { status: 405 })
