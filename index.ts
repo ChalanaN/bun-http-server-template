@@ -6,6 +6,7 @@ import { MIME_TYPES, type AllowedFileExtensions } from "./utils";
 const STATIC_DIR = path.resolve(__dirname, process.env.STATIC_DIR || "public")
 const StaticFileMap = new Map<string, number>()
 const MEM_CACHABLE_FILES = ["html", "js", "css", "ico", "svg"]
+const MEM_CACHE_TIMEOUT = 1800
 
 // Load a static file map into memory to reduce I/O calls
 ;(await fs.readdir(STATIC_DIR, {
@@ -47,7 +48,7 @@ const sendFile = async (filepath: string, options?: ResponseInit): Promise<Respo
     if (fileExtension && MEM_CACHABLE_FILES.includes(fileExtension)) {
         let fileBuf = new Uint8Array(await file.arrayBuffer())
         console.log("done caching:", resolvedPath, fileBuf.length)
-        redis.set(`file:${resolvedPath}`, fileBuf)
+        redis.set(`file:${resolvedPath}`, fileBuf, "EX", MEM_CACHE_TIMEOUT)
 
         return new Response(fileBuf, {
             headers: {
