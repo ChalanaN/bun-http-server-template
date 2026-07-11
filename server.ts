@@ -51,7 +51,12 @@ async function sendFile (filepath: string, options: Mutable<ResponseInit> = {}):
     if (resolvedPath == STATIC_DIR) resolvedPath = path.join(resolvedPath, "index.html")
     if (!resolvedPath.startsWith(STATIC_DIR + path.sep)) return Promise.resolve(new Response("403", { status: 403 }))
 
-    resolvedPath = resolveStaticPath(resolvedPath)
+    try {
+        resolvedPath = resolveStaticPath(resolvedPath)
+    } catch {
+        resolvedPath = path.join(STATIC_DIR, "404.html")
+        options.status = 404
+    }
 
     let fileExtension = resolvedPath.match(/\.(\w+?)$/)?.[1]
     let contentType = MIME_TYPES[fileExtension as AllowedFileExtension] || "text/plain"
@@ -87,5 +92,5 @@ function resolveStaticPath (resolvedPath: string): string {
     if (StaticFileMap.has(resolvedPath)) return resolvedPath
     if (StaticFileMap.has(resolvedPath + ".html")) return resolvedPath + ".html"
     if (StaticFileMap.has(resolvedPath = path.join(resolvedPath, "index.html"))) return resolvedPath
-    return path.join(STATIC_DIR, "404.html")
+    throw new Error()
 }
